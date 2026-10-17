@@ -363,7 +363,7 @@ function renderMessage(m) {
   }
 
   const bubble = document.createElement("div");
-  bubble.className = "bubble";
+  bubble.className = "bubble " + m.kind;
 
   switch (m.kind) {
     case "text":
@@ -512,7 +512,7 @@ function renderMessage(m) {
   wrap.appendChild(bubble);
   if (m.kind === "quote" && m.quote) {
     const quote = document.createElement("div");
-    quote.className = "quote" + (m.quote.svrId ? " quote-link" : "");
+    quote.className = "quote-block" + (m.quote.svrId ? " quote-link" : "");
     quote.title = m.quote.svrId ? "点击定位到原消息" : "";
     const name = document.createElement("span");
     name.className = "quote-name";

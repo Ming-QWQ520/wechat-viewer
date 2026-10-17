@@ -167,12 +167,12 @@ body {
 .day-sep { text-align: center; color: #9a9a9a; font-size: 12px; margin: 16px 0 10px; }
 .sys { text-align: center; color: #9a9a9a; font-size: 12px; margin: 10px auto; max-width: 80%; }
 .pat { text-align: center; color: #9a9a9a; font-size: 12px; margin: 10px auto; max-width: 80%; }
-.quote {
-  margin-top: 4px;
-  background: #d9d9d9;
-  color: #555;
-  border-radius: 6px;
-  padding: 7px 9px;
+.quote-block {
+  margin-top: 6px;
+  background: transparent;
+  color: #8a8a8a;
+  border-radius: 0;
+  padding: 0;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -182,7 +182,7 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.row.out .quote { background: rgba(0, 0, 0, 0.28); color: #f2f2f2; }
+.row.out .quote-block { background: transparent; color: #8a8a8a; }
 .quote-link { cursor: pointer; }
 .quote-link:hover { filter: brightness(0.97); }
 .quote-name { font-weight: 600; margin-right: 4px; }
@@ -191,7 +191,8 @@ body {
 .row { display: flex; gap: 8px; margin: 10px 0; align-items: flex-start; }
 .row.out { flex-direction: row-reverse; }
 .row .avatar { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; font-size: 15px; position: relative; overflow: hidden; }
-.wrap { max-width: 66%; }
+.wrap { max-width: 66%; display: flex; flex-direction: column; align-items: flex-start; }
+.row.out .wrap { align-items: flex-end; }
 .name { font-size: 12px; color: #8a8a8a; margin: 0 0 4px 2px; }
 .bubble {
   background: #fff;
@@ -204,6 +205,8 @@ body {
   width: fit-content;
 }
 .row.out .bubble { background: var(--green); }
+.row.out .bubble.text,
+.row.out .bubble.quote { background: transparent !important; padding: 0; }
 .bubble.image { padding: 3px; background: transparent !important; }
 .bubble.image img { display: block; max-width: 240px; max-height: 320px; border-radius: 4px; cursor: zoom-in; }
 .bubble.sticker-bubble { padding: 0; background: transparent !important; }
