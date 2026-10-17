@@ -224,10 +224,14 @@ async function mapLimit(items, limit, fn) {
 
 function bubbleHtml(message, media, group, avatarClass = null) {
   if (message.kind === "system") {
-    return `<div class="wx-system" data-kind="system">${linksToHtml(message.system || "")}</div>`;
+    return `<div class="wx-system" data-kind="system">${linksToHtml(message.system || "")}<div class="wx-time wx-time-center">${formatDateTime(
+      message.time,
+    )}</div></div>`;
   }
   if (message.kind === "pat") {
-    return `<div class="wx-system wx-pat" data-kind="pat">${escapeHtml(message.text || "拍了拍")}</div>`;
+    return `<div class="wx-system wx-pat" data-kind="pat">${escapeHtml(message.text || "拍了拍")}<div class="wx-time wx-time-center">${formatDateTime(
+      message.time,
+    )}</div></div>`;
   }
   const cls = message.isSelf ? "out" : "in";
   const nameHtml = !message.isSelf && group ? `<div class="wx-name">${escapeHtml(message.senderName)}</div>` : "";
@@ -316,7 +320,7 @@ function bubbleHtml(message, media, group, avatarClass = null) {
   }
   return `<div class="wx-row ${cls}" data-kind="${escapeHtml(message.kind)}">
   <div class="wx-avatar${avatarExtraClass}"${avatarStyle}>${avatarInner}</div>
-  <div class="wx-bubble-wrap">${nameHtml}<div class="wx-bubble ${message.kind}">${inner}</div></div>
+  <div class="wx-bubble-wrap">${nameHtml}<div class="wx-bubble ${message.kind}">${inner}</div><div class="wx-time">${formatDateTime(message.time)}</div></div>
 </div>`;
 }
 
@@ -344,6 +348,9 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-avatar { width: 36px; height: 36px; border-radius: 6px; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; flex: 0 0 36px; position: relative; overflow: hidden; background-size: cover; background-position: center; }
 .wx-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .wx-bubble-wrap { max-width: 68%; }
+.wx-time { margin-top: 4px; color: #a8a8a8; font-size: 11px; line-height: 1.3; }
+.wx-time-center { text-align: center; }
+.wx-row.out .wx-time { text-align: right; }
 .wx-name { font-size: 12px; color: #8a8a8a; margin: 0 0 4px 2px; }
 .wx-bubble { padding: 9px 12px; border-radius: 6px; position: relative; word-break: break-word; white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
 .wx-row.in .wx-bubble { background: #fff; }
