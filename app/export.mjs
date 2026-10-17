@@ -65,7 +65,7 @@ const DEFAULT_STICKER_BUDGET = 150 * 1024 * 1024;
 async function resolveMedia(data, username, message, cacheDir, budget) {
   const out = { imageUri: null, imageType: null, voiceUri: null, voiceDuration: null, voicePath: null, filePath: null, videoPath: null, thumbUri: null, stickerUri: null, stickerPath: null };
   if (message.kind === "image" && message.image?.localName) {
-    const decoded = data.readBestImage(username, message.image.localName);
+    const decoded = await data.readBestImageAsync(username, message.image.localName);
     if (decoded && decoded.buffer.length <= MAX_EMBED_ITEM && budget.remaining >= decoded.buffer.length) {
       budget.remaining -= decoded.buffer.length;
       out.imageUri = imageDataUri(decoded.buffer, decoded.contentType);
@@ -148,6 +148,14 @@ function messagePlainText(message, media) {
       return `[链接] ${message.link.title}${message.link.url ? ` ${message.link.url}` : ""}`;
     case "sticker":
       return "[表情]";
+    case "quote":
+      return `[引用${message.quote?.sender ? ` ${message.quote.sender}` : ""}] ${message.quote?.text || ""}${
+        message.text ? `\n${message.text}` : ""
+      }`;
+    case "chatRecord":
+      return `[聊天记录] ${message.link?.title || message.text || ""}`;
+    case "pat":
+      return message.text || "拍了拍";
     case "location":
       return `[位置] ${message.location.label || message.location.poiName || ""}`;
     case "card":
@@ -216,7 +224,10 @@ async function mapLimit(items, limit, fn) {
 
 function bubbleHtml(message, media, group, avatarClass = null) {
   if (message.kind === "system") {
-    return `<div class="wx-system">${linksToHtml(message.system || "")}</div>`;
+    return `<div class="wx-system" data-kind="system">${linksToHtml(message.system || "")}</div>`;
+  }
+  if (message.kind === "pat") {
+    return `<div class="wx-system wx-pat" data-kind="pat">${escapeHtml(message.text || "拍了拍")}</div>`;
   }
   const cls = message.isSelf ? "out" : "in";
   const nameHtml = !message.isSelf && group ? `<div class="wx-name">${escapeHtml(message.senderName)}</div>` : "";
@@ -235,9 +246,9 @@ function bubbleHtml(message, media, group, avatarClass = null) {
       break;
     case "voice": {
       const seconds = Math.max(1, Math.round(message.voice.durationMs / 1000));
-      const width = Math.min(240, 80 + seconds * 6);
+      const width = Math.min(240, 64 + seconds * 6);
       inner = media.voiceUri
-        ? `<div class="wx-voice" style="width:${width}px"><audio controls preload="none" src="${media.voiceUri}"></audio><span>${seconds}″</span></div>`
+        ? `<div class="wx-voice" style="width:${width}px"><button class="wx-voice-btn" type="button" aria-label="播放语音">▶</button><span class="wx-voice-wave" aria-hidden="true"><i></i><i></i><i></i></span><span class="wx-voice-dur">${seconds}″</span><audio preload="none" src="${media.voiceUri}"></audio></div>`
         : `<div class="wx-text">[语音 ${seconds}″]${
             media.voicePath ? ` <span class="wx-sub">${escapeHtml(media.voicePath)}</span>` : ""
           }</div>`;
@@ -273,6 +284,20 @@ function bubbleHtml(message, media, group, avatarClass = null) {
             media.stickerPath ? ` <span class="wx-sub">${escapeHtml(media.stickerPath)}</span>` : ""
           }</div>`;
       break;
+    case "quote":
+      inner = `${
+        message.quote?.sender || message.quote?.text
+          ? `<div class="wx-quote">${
+              message.quote?.sender ? `<div class="wx-quote-name">${escapeHtml(message.quote.sender)}</div>` : ""
+            }<div class="wx-quote-text">${escapeHtml(message.quote?.text || "")}</div></div>`
+          : ""
+      }<div class="wx-text">${linksToHtml(message.text || "")}</div>`;
+      break;
+    case "chatRecord":
+      inner = `<div class="wx-file"><div class="wx-file-icon">💬</div><div class="wx-file-body"><div class="wx-file-name">${escapeHtml(
+        message.link?.title || message.text || "聊天记录",
+      )}</div><div class="wx-sub">聊天记录</div></div></div>`;
+      break;
     case "location":
       inner = `<div class="wx-text">[位置] ${escapeHtml(message.location?.label || "")}${
         message.location?.poiName ? ` · ${escapeHtml(message.location.poiName)}` : ""
@@ -289,7 +314,7 @@ function bubbleHtml(message, media, group, avatarClass = null) {
     default:
       inner = `<div class="wx-text">${escapeHtml(message.text || "[消息]")}</div>`;
   }
-  return `<div class="wx-row ${cls}">
+  return `<div class="wx-row ${cls}" data-kind="${escapeHtml(message.kind)}">
   <div class="wx-avatar${avatarExtraClass}"${avatarStyle}>${avatarInner}</div>
   <div class="wx-bubble-wrap">${nameHtml}<div class="wx-bubble ${message.kind}">${inner}</div></div>
 </div>`;
@@ -305,6 +330,12 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-header-avatar { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: #ddd; flex: 0 0 44px; }
 .wx-header h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .wx-header .wx-meta { margin-top: 4px; color: #888; font-size: 12px; }
+.wx-search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.wx-search input { flex: 1; min-width: 180px; border: 1px solid #ccc; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+.wx-search select { border: 1px solid #ccc; border-radius: 6px; padding: 6px 8px; font-size: 13px; background: #fff; }
+.wx-search button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.wx-search-count { color: #888; font-size: 12px; }
+.wx-row.hidden { display: none; }
 .wx-chat { padding: 18px 16px; }
 .wx-day { text-align: center; color: #9a9a9a; font-size: 12px; margin: 18px 0 12px; }
 .wx-row { display: flex; align-items: flex-start; margin: 10px 0; gap: 8px; }
@@ -322,8 +353,23 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-bubble.sticker { padding: 0; background: transparent !important; }
 .wx-sticker-img { display: block; background-size: contain; background-repeat: no-repeat; background-position: center; }
 .wx-img img { display: block; max-width: 240px; max-height: 320px; border-radius: 4px; }
-.wx-voice { display: flex; align-items: center; gap: 6px; }
-.wx-voice audio { width: 180px; height: 32px; }
+.wx-voice { display: flex; align-items: center; gap: 9px; min-height: 26px; }
+.wx-row.out .wx-voice { flex-direction: row-reverse; }
+.wx-voice audio { display: none; }
+.wx-voice-btn { width: 26px; height: 26px; border-radius: 50%; border: none; background: rgba(0,0,0,.12); color: inherit; cursor: pointer; font-size: 11px; line-height: 26px; padding: 0; flex: 0 0 26px; }
+.wx-voice-wave { display: inline-flex; align-items: flex-end; gap: 2px; height: 15px; }
+.wx-voice-wave i { display: block; width: 3px; height: 8px; border-radius: 2px; background: currentColor; opacity: .75; }
+.wx-voice-wave i:nth-child(2) { height: 14px; }
+.wx-voice-wave i:nth-child(3) { height: 11px; }
+.wx-voice.playing .wx-voice-btn { background: rgba(7,193,96,.85); color: #fff; }
+.wx-voice.playing .wx-voice-wave i { animation: wxVoicePulse .7s ease-in-out infinite alternate; }
+.wx-voice.playing .wx-voice-wave i:nth-child(2) { animation-delay: .15s; }
+.wx-voice.playing .wx-voice-wave i:nth-child(3) { animation-delay: .3s; }
+.wx-voice-dur { font-size: 13px; opacity: .8; }
+@keyframes wxVoicePulse { from { transform: scaleY(.45); } to { transform: scaleY(1.15); } }
+.wx-quote { background: rgba(0,0,0,.055); border-left: 3px solid rgba(0,0,0,.12); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; color: #666; white-space: pre-wrap; word-break: break-word; }
+.wx-row.out .wx-quote { background: rgba(0,0,0,.08); }
+.wx-quote-name { font-weight: 500; margin-bottom: 2px; }
 .wx-video img { display: block; max-width: 260px; border-radius: 4px; }
 .wx-video-placeholder { width: 220px; height: 140px; background: #333; color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 28px; }
 .wx-video-link { position: relative; display: inline-block; }
@@ -337,22 +383,104 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-link-desc { color: #888; font-size: 12px; }
 .wx-link-url { color: #9a9a9a; font-size: 11px; margin-top: 4px; word-break: break-all; }
 .wx-system { text-align: center; color: #9a9a9a; font-size: 12px; margin: 12px auto; max-width: 80%; }
+.wx-pat { color: #9a9a9a; }
 .wx-footer { text-align: center; color: #b0b0b0; font-size: 12px; margin-top: 30px; }
 `;
 
-export function exportChatFilename(data, username, format) {
-  const name = data.contactInfo(username).displayName;
+const EXPORT_SCRIPT = `
+(function () {
+  var rows = Array.prototype.slice.call(document.querySelectorAll('[data-kind]'));
+  var input = document.getElementById('wx-search-input');
+  var kind = document.getElementById('wx-search-kind');
+  var count = document.getElementById('wx-search-count');
+  var clear = document.getElementById('wx-search-clear');
+  var cache = new Map();
+  function textOf(el) {
+    var text = cache.get(el);
+    if (text === undefined) {
+      var bubble = el.querySelector('.wx-bubble');
+      text = (bubble ? bubble.textContent : el.textContent || '').toLowerCase();
+      cache.set(el, text);
+    }
+    return text;
+  }
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+    var k = kind.value;
+    var shown = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var el = rows[i];
+      var okKind = !k || el.getAttribute('data-kind') === k;
+      var okText = !q || textOf(el).indexOf(q) !== -1;
+      var show = okKind && okText;
+      el.classList.toggle('hidden', !show);
+      if (show) shown++;
+    }
+    count.textContent = (q || k) ? ('找到 ' + shown + ' 条') : ('共 ' + rows.length + ' 条');
+  }
+  var timer = null;
+  input.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(apply, 180); });
+  kind.addEventListener('change', apply);
+  clear.addEventListener('click', function () { input.value = ''; kind.value = ''; apply(); });
+  count.textContent = '共 ' + rows.length + ' 条';
+
+  var current = null;
+  document.querySelectorAll('.wx-voice').forEach(function (voice) {
+    var audio = voice.querySelector('audio');
+    var button = voice.querySelector('.wx-voice-btn');
+    if (!audio || !button) return;
+    button.addEventListener('click', function () {
+      if (current && current !== audio) {
+        current.pause();
+        document.querySelectorAll('.wx-voice.playing').forEach(function (v) { v.classList.remove('playing'); });
+      }
+      if (audio.paused) {
+        audio.play();
+        voice.classList.add('playing');
+        current = audio;
+      } else {
+        audio.pause();
+        voice.classList.remove('playing');
+      }
+    });
+    audio.addEventListener('ended', function () { voice.classList.remove('playing'); });
+  });
+})();
+`;
+
+export function exportChatFilename(data, username, format) {  const name = data.contactInfo(username).displayName;
   const ext = format === "html" ? "html" : format === "csv" ? "csv" : "txt";
   return `chat-${safeFileName(name)}-${formatDay(Math.floor(Date.now() / 1000))}.${ext}`;
 }
 
-const HTML_HEADER = (title, name, count, exportTime, avatarUri) => `<!DOCTYPE html>
+const HTML_HEADER = (title, name, count, exportTime, avatarUri, alias) => `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><style>${HTML_STYLE}</style></head>
 <body><div class="wx-shell">
 <div class="wx-header"><div class="wx-head">${
   avatarUri ? `<img class="wx-header-avatar" src="${avatarUri}" alt="">` : ""
-}<div><h1>${escapeHtml(name)}</h1><div class="wx-meta">共 ${count} 条消息 · 导出于 ${exportTime}</div></div></div></div>
+}<div><h1>${escapeHtml(name)}</h1><div class="wx-meta">${
+  alias ? `微信号：${escapeHtml(alias)} · ` : ""
+}共 ${count} 条消息 · 导出于 ${exportTime}</div></div></div>
+<div class="wx-search">
+  <input id="wx-search-input" placeholder="搜索聊天记录" autocomplete="off">
+  <select id="wx-search-kind">
+    <option value="">全部类型</option>
+    <option value="text">文字</option>
+    <option value="image">图片</option>
+    <option value="voice">语音</option>
+    <option value="video">视频</option>
+    <option value="file">文件</option>
+    <option value="sticker">表情</option>
+    <option value="link">链接</option>
+    <option value="quote">引用</option>
+    <option value="chatRecord">聊天记录</option>
+    <option value="pat">拍一拍</option>
+    <option value="system">系统</option>
+  </select>
+  <button id="wx-search-clear" type="button">清除</button>
+  <span class="wx-search-count" id="wx-search-count"></span>
+</div></div>
 <div class="wx-chat">
 `;
 
@@ -421,7 +549,7 @@ export async function exportChatHtmlStream(data, username, cacheDir, write, opti
     avatarClasses.set(sender, className);
     avatarRules.push(`.${className}{background-image:url("${uri}")}`);
   }
-  write(HTML_HEADER(title, name, messages.length, exportTime, chatAvatarUri));
+  write(HTML_HEADER(title, name, messages.length, exportTime, chatAvatarUri, info.alias || ""));
   const styleRules = [];
   for (const style of stickerStyles.values()) {
     styleRules.push(
@@ -448,7 +576,7 @@ export async function exportChatHtmlStream(data, username, cacheDir, write, opti
     chunk += bubbleHtml(message, media, group, avatarClasses.get(sender) || null);
     write(chunk);
   }
-  write(`\n</div>\n<div class="wx-footer">由 WeChatViewer 导出</div>\n</div></body></html>`);
+  write(`\n</div>\n<div class="wx-footer">由 WeChatViewer 导出</div>\n</div><script>${EXPORT_SCRIPT}</script></body></html>`);
   return {
     filename: `chat-${safeFileName(name)}-${formatDay(Math.floor(Date.now() / 1000))}.html`,
     contentType: "text/html; charset=utf-8",
@@ -539,6 +667,17 @@ export async function exportChatCsv(data, username, cacheDir) {
       case "sticker":
         content = "[表情]";
         mediaPath = media.stickerPath || "";
+        break;
+      case "quote":
+        content = `[引用${message.quote?.sender ? ` ${message.quote.sender}` : ""}] ${message.quote?.text || ""} ${
+          message.text || ""
+        }`;
+        break;
+      case "chatRecord":
+        content = `[聊天记录] ${message.link?.title || message.text || ""}`;
+        break;
+      case "pat":
+        content = message.text || "拍了拍";
         break;
       case "location":
         content = `[位置] ${message.location?.label || ""} ${message.location?.poiName || ""}`;

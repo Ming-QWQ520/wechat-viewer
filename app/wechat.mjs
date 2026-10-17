@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { execFileSync } from "node:child_process";
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 
@@ -58,6 +59,20 @@ export function htmlUnescape(text) {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
     .replace(/&amp;/g, "&");
+}
+
+/**
+ * Trim WeChat text noise: CRLF, zero-width characters, trailing spaces on each
+ * line, outer blank lines and runs of empty lines. Internal single line breaks
+ * are preserved because users often write multi-line messages on purpose.
+ */
+export function normalizeText(text) {
+  return String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200b\u200c\u200d\ufeff]/g, "")
+    .replace(/[ \t\u00a0\u2005\u3000]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^[\s\u00a0\u2005\u3000]+|[\s\u00a0\u2005\u3000]+$/g, "");
 }
 
 function stripXml(text) {
@@ -137,6 +152,18 @@ export class WeChatData {
     this.imageCandidateCache = new Map();
     this.videoIndex = null;
     this.fileIndex = null;
+    this.searchIndexes = new Map();
+    this.imgcheckPath = path.resolve(path.dirname(dataDir), "tools", "imgcheck.exe");
+    this.validationFile = path.join(dataDir, "media-cache", "image-validation.json");
+    this.validationDir = path.join(dataDir, "media-cache", "imgcheck");
+    this.validationCache = new Map();
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.validationFile, "utf8"));
+      for (const [key, value] of Object.entries(saved)) this.validationCache.set(key, Boolean(value));
+    } catch {
+      // first run
+    }
+    this.validationTimer = null;
     this.selfUsername = this.detectSelf();
     this.loadContacts();
   }
@@ -210,6 +237,7 @@ export class WeChatData {
       result.push({
         username: row.username,
         name: info.displayName,
+        alias: info.alias || "",
         isGroup,
         isSelf: row.username === this.selfUsername,
         unread: Number(row.unread_count) || 0,
@@ -323,6 +351,53 @@ export class WeChatData {
     for (let i = pages.length - 1; i >= 0; i--) onPage(pages[i]);
   }
 
+  // ---------- search ----------
+
+  searchIndex(username) {
+    if (this.searchIndexes.has(username)) {
+      const cached = this.searchIndexes.get(username);
+      this.searchIndexes.delete(username);
+      this.searchIndexes.set(username, cached);
+      return cached;
+    }
+    const list = [];
+    this.allMessages(username, (page) => list.push(...page));
+    this.searchIndexes.set(username, list);
+    while (this.searchIndexes.size > 2) {
+      this.searchIndexes.delete(this.searchIndexes.keys().next().value);
+    }
+    return list;
+  }
+
+  messageSearchText(message) {
+    const parts = [message.text || "", message.senderName || ""];
+    if (message.link) parts.push(message.link.title, message.link.description, message.link.url);
+    if (message.file) parts.push(message.file.name);
+    if (message.card) parts.push(message.card.nickname, message.card.username);
+    if (message.location) parts.push(message.location.label, message.location.poiName);
+    if (message.quote) parts.push(message.quote.sender, message.quote.text);
+    return parts.filter(Boolean).join("\n").toLowerCase();
+  }
+
+  searchMessages(username, { query = "", types = [], limit = 200 } = {}) {
+    const q = normalizeText(query).toLowerCase();
+    const kinds = new Set(Array.isArray(types) ? types.filter(Boolean) : []);
+    const index = this.searchIndex(username);
+    const results = [];
+    let limited = false;
+    for (let i = index.length - 1; i >= 0; i--) {
+      const message = index[i];
+      if (kinds.size > 0 && !kinds.has(message.kind)) continue;
+      if (q && !this.messageSearchText(message).includes(q)) continue;
+      if (results.length >= limit) {
+        limited = true;
+        break;
+      }
+      results.push(message);
+    }
+    return { messages: results, limited };
+  }
+
   // ---------- message parsing ----------
 
   parseMessage(row, chatUsername, names, shard) {
@@ -364,7 +439,7 @@ export class WeChatData {
     switch (base) {
       case 1: {
         message.kind = "text";
-        message.text = content;
+        message.text = normalizeText(content);
         break;
       }
       case 3: {
@@ -469,28 +544,64 @@ export class WeChatData {
     const des = htmlUnescape(stripXml(getTag(app, "des") || ""));
     const url = htmlUnescape(getTag(app, "url") || "");
     const lowurl = htmlUnescape(getTag(app, "lowurl") || "");
-    const isFile = appType === 6 || /<appattach>/.test(app);
-    if (isFile) {
+    message.app = { type: appType };
+
+    // 引用回复：title 是回复内容，<refermsg> 里是被引用的消息。
+    if (appType === 57) {
+      const replyText = normalizeText(title) || normalizeText(des) || "引用消息";
+      message.kind = "quote";
+      message.text = replyText;
+      const referMatch = app.match(/<refermsg>([\s\S]*?)<\/refermsg>/);
+      const referXml = referMatch ? referMatch[1] : "";
+      const referType = Number(getTag(referXml, "type") || 0);
+      let quoted = htmlUnescape(stripXml(getTag(referXml, "content") || ""));
+      if (referType === 3) quoted = "[图片]";
+      else if (referType === 34) quoted = "[语音]";
+      else if (referType === 43) quoted = "[视频]";
+      else if (referType === 47) quoted = "[表情]";
+      else if (referType === 49) quoted = "[链接]";
+      message.quote = {
+        sender: htmlUnescape(stripXml(getTag(referXml, "displayname") || "")),
+        text: normalizeText(quoted),
+      };
+      return;
+    }
+
+    // 拍一拍：appmsg type 62，不是文件。
+    if (appType === 62) {
+      message.kind = "pat";
+      message.text = normalizeText(title) || "拍了拍";
+      return;
+    }
+
+    // 只有 type 6 才是文件附件；其他 appmsg 也可能带空 <appattach>。
+    if (appType === 6) {
       const totalLen = Number(getTag(app, "totallen") || 0);
       const ext = getTag(app, "fileext") || "";
       message.kind = "file";
       message.file = {
-        name: title || "未命名文件",
+        name: normalizeText(title) || "未命名文件",
         size: totalLen,
         ext,
         url: url || lowurl,
       };
       return;
     }
+
+    if (appType === 19) {
+      message.kind = "chatRecord";
+      message.text = normalizeText(title) || "[聊天记录]";
+      message.link = { title: message.text, description: normalizeText(des), url: url || lowurl, appType };
+      return;
+    }
+
     message.kind = "link";
     message.link = {
-      title: title || "链接",
-      description: des,
+      title: normalizeText(title) || normalizeText(des) || "链接",
+      description: normalizeText(des),
       url: url || lowurl,
       appType,
     };
-    // Quote messages carry the quoted text in the title/des
-    if (appType === 57) message.link.title = title || "引用消息";
   }
 
   // ---------- media resolution ----------
@@ -517,10 +628,13 @@ export class WeChatData {
   imageCandidates(chatUsername, localName) {
     if (!localName) return [];
     const cacheKey = `${chatUsername}\u0000${localName}`;
-    if (this.imageCandidateCache.has(cacheKey)) return this.imageCandidateCache.get(cacheKey);
+    const cached = this.imageCandidateCache.get(cacheKey);
+    // Short TTL so originals downloaded by WeChat while the viewer is running
+    // are picked up without restarting the server.
+    if (cached && Date.now() - cached.time < 60000) return cached.files;
     const base = this.chatAttachDir(chatUsername);
     const months = this.listSubdirs(base);
-    const variants = ["", "_h", "_W", "_t_W", "_t"];
+    const variants = ["_h", "", "_W", "_t_W", "_t"];
     const result = [];
     for (const variant of variants) {
       for (const month of months) {
@@ -530,7 +644,7 @@ export class WeChatData {
         }
       }
     }
-    this.imageCandidateCache.set(cacheKey, result);
+    this.imageCandidateCache.set(cacheKey, { files: result, time: Date.now() });
     return result;
   }
 
@@ -538,24 +652,96 @@ export class WeChatData {
     return this.imageCandidates(chatUsername, localName)[0] ?? null;
   }
 
-  /** Decode the best available browser-displayable image variant. */
-  readBestImage(chatUsername, localName) {
-    for (const candidate of this.imageCandidates(chatUsername, localName)) {
-      if (candidate.ext !== ".dat") {
-        const raw = fs.readFileSync(candidate.file);
-        if (!isDisplayableImage(raw)) continue;
-        return { buffer: raw, contentType: imageContentType(raw), variant: candidate.variant };
-      }
-      const raw = fs.readFileSync(candidate.file);
-      const decoded = decodeImageFile(raw, {
-        aesKey: this.imageAesKey,
-        xorKey: this.imageXorKey,
-      });
-      if (decoded && isDisplayableImage(decoded)) {
-        return { buffer: decoded, contentType: imageContentType(decoded), variant: candidate.variant };
+  /** Fully decode a candidate image to reject truncated/corrupt cache files. */
+  validateImage(sourceKey, buffer) {
+    if (this.validationCache.has(sourceKey)) return this.validationCache.get(sourceKey);
+    const type = imageContentType(buffer);
+    let valid = null;
+    if (type === "image/png") {
+      valid = validatePngBuffer(buffer);
+    } else if (type === "image/jpeg" || type === "image/gif") {
+      if (!fs.existsSync(this.imgcheckPath)) return null;
+      const temp = path.join(this.validationDir, `${crypto.createHash("md5").update(sourceKey).digest("hex")}.img`);
+      try {
+        fs.mkdirSync(this.validationDir, { recursive: true });
+        fs.writeFileSync(temp, buffer);
+        const output = execFileSync(this.imgcheckPath, [temp], {
+          encoding: "utf8",
+          timeout: 20000,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024,
+        });
+        valid = output.startsWith("OK\t");
+      } catch {
+        valid = false;
+      } finally {
+        try {
+          fs.unlinkSync(temp);
+        } catch {}
       }
     }
+    if (valid === null) return null;
+    this.validationCache.set(sourceKey, valid);
+    this.scheduleValidationSave();
+    return valid;
+  }
+
+  scheduleValidationSave() {
+    if (this.validationTimer) return;
+    this.validationTimer = setTimeout(() => {
+      this.validationTimer = null;
+      try {
+        const payload = JSON.stringify(Object.fromEntries(this.validationCache));
+        fs.mkdirSync(path.dirname(this.validationFile), { recursive: true });
+        fs.writeFileSync(this.validationFile, payload);
+      } catch {}
+    }, 800);
+    this.validationTimer.unref?.();
+  }
+
+  /** Decode the best available browser-displayable image variant (sync). */
+  readBestImage(chatUsername, localName) {
+    for (const candidate of this.imageCandidates(chatUsername, localName)) {
+      let raw;
+      try {
+        raw = fs.readFileSync(candidate.file);
+      } catch {
+        continue;
+      }
+      let decoded = raw;
+      if (candidate.ext === ".dat") {
+        decoded = decodeImageFile(raw, { aesKey: this.imageAesKey, xorKey: this.imageXorKey });
+        if (!decoded) continue;
+      }
+      const clean = trimImageBuffer(decoded);
+      if (!clean || !isDisplayableImage(clean)) continue;
+      let stat;
+      try {
+        stat = fs.statSync(candidate.file);
+      } catch {
+        continue;
+      }
+      const sourceKey = `${candidate.file}|${stat.size}|${stat.mtimeMs}`;
+      const valid = this.validateImage(sourceKey, clean);
+      if (valid === false) continue;
+      return {
+        buffer: clean,
+        contentType: imageContentType(clean),
+        variant: candidate.variant,
+        preview: candidate.variant.includes("_t"),
+      };
+    }
     return null;
+  }
+
+  /**
+   * Prefer a complete `_h` original, then the delivered mid-size file, then
+   * thumbnails. WeChat's wxgf/HEVC mid-size files are previews and usually
+   * incomplete locally; they are not rendered (the thumbnail is used instead)
+   * because half-decoded frames look like green noise.
+   */
+  async readBestImageAsync(chatUsername, localName) {
+    return this.readBestImage(chatUsername, localName);
   }
 
   videoAssetsIndex() {
@@ -910,6 +1096,74 @@ function decodeEmoticonFile(buf, key) {
  * - Legacy: single-byte XOR
  * Returns decoded bytes, or null when a V2 file cannot be decoded without a key.
  */
+/**
+ * Cut WeChat's 101-byte trailer (and similar padding) after the real image
+ * terminator. Returns null when the container never reaches a valid end.
+ */
+/** Validate PNG chunk structure and inflate IDAT data (supports APNG). */
+export function validatePngBuffer(buf) {
+  if (!buf || buf.length < 33 || buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) {
+    return false;
+  }
+  let pos = 8;
+  let ihdr = null;
+  const idat = [];
+  while (pos + 12 <= buf.length) {
+    const length = buf.readUInt32BE(pos);
+    if (length > buf.length || pos + 12 + length > buf.length) return false;
+    const type = buf.toString("latin1", pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + length);
+    if (type === "IHDR") ihdr = data;
+    else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    pos += 12 + length;
+  }
+  if (!ihdr || ihdr.length < 13 || idat.length === 0) return false;
+  const width = ihdr.readUInt32BE(0);
+  const height = ihdr.readUInt32BE(4);
+  const bitDepth = ihdr[8];
+  const colorType = ihdr[9];
+  const interlace = ihdr[12];
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+  if (!width || !height || !channels) return false;
+  try {
+    const raw = zlib.inflateSync(Buffer.concat(idat));
+    if (!interlace) {
+      const bpp = Math.ceil((channels * bitDepth) / 8);
+      if (raw.length < height * (1 + width * bpp)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function trimImageBuffer(buf) {  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    for (let i = buf.length - 2; i >= 2; i--) {
+      if (buf[i] === 0xff && buf[i + 1] === 0xd9) return buf.subarray(0, i + 2);
+    }
+    return null;
+  }
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    const end = Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
+    const idx = buf.lastIndexOf(end);
+    return idx >= 0 ? buf.subarray(0, idx + end.length) : null;
+  }
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+    const stop = Math.max(0, buf.length - 8192);
+    for (let i = buf.length - 1; i >= stop; i--) {
+      if (buf[i] === 0x3b) return buf.subarray(0, i + 1);
+    }
+    return null;
+  }
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf.length >= 12) {
+    const size = buf.readUInt32LE(4) + 8;
+    return size <= buf.length ? buf.subarray(0, size) : null;
+  }
+  return buf.subarray(0, 4).toString("latin1") === "wxgf" ? buf : null;
+}
+
 export function decodeImageFile(buf, { aesKey = null, xorKey = 0x8f } = {}) {
   if (buf.length >= 15) {
     const sig = buf.subarray(0, 6);
@@ -938,13 +1192,13 @@ export function decodeImageFile(buf, { aesKey = null, xorKey = 0x8f } = {}) {
         const raw = buf.subarray(15 + aligned, rawEnd);
         const xorPart = Buffer.from(buf.subarray(rawEnd).map((v) => v ^ xorKey));
         const out = Buffer.concat([aesPlain.subarray(0, aesSize), raw, xorPart]);
-        return isImageMagic(out) ? out : null;
+        return isImageMagic(out) ? trimImageBuffer(out) : null;
       } catch {
         return null;
       }
     }
   }
-  if (isImageMagic(buf)) return buf;
+  if (isImageMagic(buf)) return trimImageBuffer(buf);
   const magics = [
     [0xff, 0xd8, 0xff],
     [0x89, 0x50, 0x4e, 0x47],
@@ -962,11 +1216,11 @@ export function decodeImageFile(buf, { aesKey = null, xorKey = 0x8f } = {}) {
     }
     if (ok) {
       const out = Buffer.from(buf.map((v) => v ^ key));
-      if (isImageMagic(out)) return out;
+      if (isImageMagic(out)) return trimImageBuffer(out);
     }
   }
   const decoded = Buffer.from(buf.map((v) => v ^ 0x8f));
-  return isImageMagic(decoded) ? decoded : null;
+  return isImageMagic(decoded) ? trimImageBuffer(decoded) : null;
 }
 
 /** Backwards-compatible wrapper for the legacy single-byte XOR path. */

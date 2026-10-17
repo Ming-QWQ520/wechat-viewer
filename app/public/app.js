@@ -7,6 +7,7 @@ const state = {
   cursor: null,
   loading: false,
   audio: null,
+  searchActive: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -144,9 +145,75 @@ async function selectChat(session) {
   $("empty").classList.add("hidden");
   $("chat-view").classList.remove("hidden");
   $("chat-title").textContent = session.name;
-  $("chat-sub").textContent = session.isGroup ? "群聊" : session.username;
+  $("chat-sub").textContent = session.isGroup ? "群聊" : session.alias || session.username;
+  state.searchActive = false;
+  $("chat-search-input").value = "";
+  $("chat-search-kind").value = "";
+  $("chat-search-status").textContent = "";
+  $("chat-search-clear").classList.add("hidden");
   const box = $("messages");
+  box.classList.remove("search-results");
   box.innerHTML = '<div class="load-more">加载中…</div>';
+  await loadMessages(true);
+}
+
+async function runSearch() {
+  if (!state.current || state.loading) return;
+  const query = $("chat-search-input").value.trim();
+  const kind = $("chat-search-kind").value;
+  if (!query && !kind) {
+    clearSearch();
+    return;
+  }
+  state.loading = true;
+  $("chat-search-status").textContent = "搜索中…";
+  try {
+    const params = new URLSearchParams({ chat: state.current, q: query, limit: "300" });
+    if (kind) params.set("types", kind);
+    const data = await (await fetch("/api/search?" + params.toString())).json();
+    state.searchActive = true;
+    const box = $("messages");
+    box.classList.add("search-results");
+    box.innerHTML = "";
+    if (!data.messages || data.messages.length === 0) {
+      box.innerHTML = '<div class="load-more">没有匹配的聊天记录</div>';
+    } else {
+      for (const message of data.messages) box.appendChild(renderMessage(message));
+    }
+    const label = kind ? `${kindLabel(kind)}` : "全部";
+    $("chat-search-status").textContent = `找到 ${data.messages?.length || 0} 条（${label}）${
+      data.limited ? "，仅显示前 300 条" : ""
+    }`;
+    $("chat-search-clear").classList.remove("hidden");
+    box.scrollTop = 0;
+  } finally {
+    state.loading = false;
+  }
+}
+
+function kindLabel(kind) {
+  const labels = {
+    text: "文字",
+    image: "图片",
+    voice: "语音",
+    video: "视频",
+    file: "文件",
+    sticker: "表情",
+    link: "链接",
+    quote: "引用",
+    chatRecord: "聊天记录",
+    pat: "拍一拍",
+    system: "系统",
+  };
+  return labels[kind] || kind;
+}
+
+async function clearSearch() {
+  state.searchActive = false;
+  $("chat-search-status").textContent = "";
+  $("chat-search-clear").classList.add("hidden");
+  $("messages").classList.remove("search-results");
+  state.cursor = null;
   await loadMessages(true);
 }
 
@@ -177,6 +244,7 @@ async function loadMessages(reset) {
     state.loading = false;
   }
 }
+
 
 function appendMessages(messages, box, reset) {
   let lastDay = null;
@@ -225,6 +293,12 @@ function renderMessage(m) {
     el.textContent = m.system || "";
     return el;
   }
+  if (m.kind === "pat") {
+    const el = document.createElement("div");
+    el.className = "pat";
+    el.textContent = m.text || "拍了拍";
+    return el;
+  }
   const row = document.createElement("div");
   row.className = "row " + (m.isSelf ? "out" : "in");
 
@@ -271,12 +345,15 @@ function renderMessage(m) {
       const seconds = Math.max(1, Math.round((m.voice?.durationMs || 0) / 1000));
       const btn = document.createElement("button");
       btn.className = "voice-btn";
-      btn.innerHTML = `<span class="ico">▶</span><span>${seconds}″</span>`;
+      btn.style.width = `${Math.min(240, 64 + seconds * 6)}px`;
+      btn.title = "点击播放语音";
+      btn.innerHTML = `<span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i></span><span class="voice-dur">${seconds}″</span>`;
       const audio = new Audio(
         mediaUrl("voice", { chat: state.current, local: m.voice.localId, ct: m.voice.createTime || 0 }),
       );
       btn.addEventListener("click", () => {
         if (state.audio && !state.audio.paused) state.audio.pause();
+        document.querySelectorAll(".voice-btn.playing").forEach((el) => el.classList.remove("playing"));
         state.audio = audio;
         btn.classList.add("playing");
         audio.currentTime = 0;
@@ -355,6 +432,33 @@ function renderMessage(m) {
       }
       break;
     }
+    case "quote": {
+      const quote = document.createElement("div");
+      quote.className = "quote";
+      const qname = document.createElement("div");
+      qname.className = "quote-name";
+      qname.textContent = m.quote?.sender || "";
+      const qtext = document.createElement("div");
+      qtext.className = "quote-text";
+      qtext.textContent = m.quote?.text || "";
+      quote.appendChild(qname);
+      quote.appendChild(qtext);
+      bubble.appendChild(quote);
+      const reply = document.createElement("div");
+      reply.className = "wx-text";
+      reply.innerHTML = linkify(m.text || "引用消息");
+      bubble.appendChild(reply);
+      break;
+    }
+    case "chatRecord": {
+      const card = document.createElement("div");
+      card.className = "file-card";
+      card.innerHTML = `<div class="icon">💬</div><div><div class="file-name">${escapeHtml(
+        m.link?.title || m.text || "聊天记录",
+      )}</div><div class="file-sub">聊天记录</div></div>`;
+      bubble.appendChild(card);
+      break;
+    }
     case "location":
       bubble.textContent = `[位置] ${m.location?.label || ""}${m.location?.poiName ? " · " + m.location.poiName : ""}`;
       break;
@@ -393,10 +497,19 @@ $("lightbox").addEventListener("click", () => {
 
 $("messages").addEventListener("scroll", () => {
   const box = $("messages");
-  if (box.scrollTop < 60 && state.hasMore && !state.loading && state.messages.length) {
+  if (!state.searchActive && box.scrollTop < 60 && state.hasMore && !state.loading && state.messages.length) {
     loadMessages(false);
   }
 });
+
+$("chat-search-btn").addEventListener("click", runSearch);
+$("chat-search-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") runSearch();
+});
+$("chat-search-kind").addEventListener("change", () => {
+  if ($("chat-search-input").value.trim() || $("chat-search-kind").value) runSearch();
+});
+$("chat-search-clear").addEventListener("click", clearSearch);
 
 $("search").addEventListener("input", (e) => {
   state.filter = e.target.value;
@@ -429,6 +542,10 @@ $("download-stickers").addEventListener("click", async () => {
         btn.disabled = false;
         btn.textContent = `补全完成 ${st.ok} 成功 / ${st.failed} 失败`;
         state.cursor = null;
+        state.searchActive = false;
+        $("messages").classList.remove("search-results");
+        $("chat-search-status").textContent = "";
+        $("chat-search-clear").classList.add("hidden");
         await loadMessages(true);
       } catch {
         clearInterval(timer);

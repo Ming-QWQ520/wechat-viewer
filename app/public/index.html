@@ -20,15 +20,37 @@
     <div id="empty" class="empty">选择左侧会话查看聊天记录</div>
     <div id="chat-view" class="chat-view hidden">
       <header class="chat-head">
-        <div>
-          <div class="chat-title" id="chat-title"></div>
-          <div class="chat-sub" id="chat-sub"></div>
+        <div class="chat-head-top">
+          <div>
+            <div class="chat-title" id="chat-title"></div>
+            <div class="chat-sub" id="chat-sub"></div>
+          </div>
+          <div class="toolbar">
+            <button id="download-stickers" title="从微信 CDN 补全本机未缓存的表情包">补全表情包</button>
+            <button data-format="html">导出 HTML</button>
+            <button data-format="txt">导出 TXT</button>
+            <button data-format="csv">导出 CSV</button>
+          </div>
         </div>
-        <div class="toolbar">
-          <button id="download-stickers" title="从微信 CDN 补全本机未缓存的表情包">补全表情包</button>
-          <button data-format="html">导出 HTML</button>
-          <button data-format="txt">导出 TXT</button>
-          <button data-format="csv">导出 CSV</button>
+        <div class="chat-search">
+          <input id="chat-search-input" placeholder="搜索聊天记录（回车查找）" autocomplete="off">
+          <select id="chat-search-kind">
+            <option value="">全部类型</option>
+            <option value="text">文字</option>
+            <option value="image">图片</option>
+            <option value="voice">语音</option>
+            <option value="video">视频</option>
+            <option value="file">文件</option>
+            <option value="sticker">表情</option>
+            <option value="link">链接</option>
+            <option value="quote">引用</option>
+            <option value="chatRecord">聊天记录</option>
+            <option value="pat">拍一拍</option>
+            <option value="system">系统</option>
+          </select>
+          <button id="chat-search-btn">查找</button>
+          <button id="chat-search-clear" class="hidden">返回聊天</button>
+          <span id="chat-search-status"></span>
         </div>
       </header>
       <div id="imgkey-banner" class="banner hidden">

@@ -1,6 +1,6 @@
 {
   "name": "wechat-viewer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local WeChat 4.x chat viewer and HTML/TXT/CSV exporter (Windows, read-only)",
   "main": "server.mjs",
   "scripts": {
@@ -22,6 +22,7 @@
   "engines": {
     "node": ">=22.5.0"
   },
+  "packageManager": "pnpm@12.4.2",
   "dependencies": {
     "silk-wasm": "^3.7.1"
   }

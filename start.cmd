@@ -15,6 +15,30 @@ if errorlevel 1 (
   exit /b 1
 )
 
+where pnpm >nul 2>nul
+if errorlevel 1 (
+  echo [x] 未找到 pnpm。请先执行 corepack enable 或 npm install -g pnpm。
+  pause
+  exit /b 1
+)
+
+if not exist "app\node_modules" (
+  echo [0/2] 安装前端依赖...
+  pushd app
+  call pnpm install
+  popd
+  if errorlevel 1 (
+    echo [x] pnpm install 失败
+    pause
+    exit /b 1
+  )
+)
+
+if not exist "tools\imgcheck.exe" (
+  echo [!] 未找到 tools\imgcheck.exe，损坏图片将无法自动回退。
+  echo     请先运行 tools\build-tools.cmd 编译密钥提取器与图片校验器。
+)
+
 set "NEED_KEYS=0"
 if not exist "data\keys.json" set "NEED_KEYS=1"
 if "%NEED_KEYS%"=="0" (

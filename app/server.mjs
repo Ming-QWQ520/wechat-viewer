@@ -248,15 +248,25 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (pathname === "/api/search") {
+      const chat = q.get("chat");
+      if (!chat) return sendJson(res, { error: "chat required" }, 400);
+      const query = q.get("q") || "";
+      const types = (q.get("types") || "").split(",").map((v) => v.trim()).filter(Boolean);
+      const limit = Math.min(500, Math.max(1, Number(q.get("limit") || 200)));
+      return sendJson(res, { ...data.searchMessages(chat, { query, types, limit }), query, types });
+    }
+
     if (pathname === "/api/media/image") {
       const chat = q.get("chat");
       const name = q.get("name");
       if (!chat || !name || !safeName(name)) return sendJson(res, { error: "bad request" }, 400);
-      const decoded = data.readBestImage(chat, name);
+      const decoded = await data.readBestImageAsync(chat, name);
       if (!decoded) return send(res, 404, "image key required", { "Content-Type": "text/plain" });
       return send(res, 200, decoded.buffer, {
         "Content-Type": decoded.contentType,
         "Cache-Control": "private, max-age=86400",
+        "X-Image-Variant": decoded.variant || "",
       });
     }
 

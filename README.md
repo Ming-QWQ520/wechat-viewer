@@ -14,10 +14,13 @@
 ## 功能
 
 - **完整历史**：同一会话的消息表可能分散在 `message_0.db`～`message_3.db` 多个分片，查看器与导出会合并全部时间段，并按 `(sort_seq, local_id)` 键集分页，不丢同毫秒的边界消息
+- **微信号**：聊天标题显示当前微信号（`alias`），而不是注册时的原始 `wxid`
+- **引用与拍一拍**：引用回复显示被引用内容，拍一拍显示为居中提示，不再误判为 0B 文件
+- **搜索**：查看器与导出的 HTML 都支持关键词搜索，并按文字/图片/语音/视频/文件/表情/链接/引用等类型筛选
 - **头像**：从 `head_image.db` 读取发送者与“我”的真实头像；缺失时回退到联系人 `big_head_url`（`wx.qlogo.cn`）下载缓存，最后才用彩色首字
-- **表情包**：解密 `business/emoticon` 中的 GIF/PNG/JPEG 表情；本机未缓存的表情在查看时按消息里的 CDN 直链自动补全（校验 MD5），也可点「补全表情包」批量下载
-- **图片**：解码旧版单字节 XOR、V1、V2 三种微信图片格式；V2 密钥由账户 seed 自动派生
-- **语音**：从 `media_*.db` 的 `VoiceInfo` 提取 SILK，用 silk-wasm 解码为 WAV，网页内直接播放，HTML 导出内嵌音频
+- **表情包**：解密 `business/emoticon` 中的 GIF/PNG/JPEG 表情；本机未缓存的表情在查看时按消息里的 CDN 直链自动补全（校验 MD5），也可点「补全表情包」批量下载。HTML 导出使用 120px 缩略图并按 MD5 去重
+- **图片**：解码旧版单字节 XOR、V1、V2 三种微信图片格式；优先使用 `_h` 原图，其次完整中间图，最后缩略图；V2 密钥由账户 seed 自动派生
+- **语音**：从 `media_*.db` 的 `VoiceInfo` 提取 SILK，用 silk-wasm 解码为 WAV；查看器与 HTML 导出使用带波形动画的微信风格语音气泡，宽度随时长变化
 - **视频/文件/链接/位置/名片/通话/系统消息**：按微信样式渲染，可打开本地视频、下载原始附件、点击链接
 - **导出**：HTML 为单文件自包含（头像、图片、语音、表情内嵌），TXT/CSV 便于检索与 Excel 处理；导出按时间正序，消息数量与数据库完全一致
 - **本机只读**：不上传聊天内容；仅“补全表情/头像”会访问消息或联系人中记录的腾讯 CDN，并对下载内容做 MD5 校验
@@ -31,24 +34,30 @@
 - Windows 10/11 x64
 - 微信 4.x，已登录（提取密钥时必须保持运行）
 - [Node.js](https://nodejs.org/) 22.5+（推荐 24 LTS；`node:sqlite` 在部分 22.x 版本需要 `--experimental-sqlite`，升级到 24 最省事）
+- [pnpm](https://pnpm.io/)（Node 自带 corepack，可先执行 `corepack enable`；仓库包含 `pnpm-lock.yaml`）
 - [Go](https://go.dev/) 1.21+（仅用于编译密钥提取器）
 
 ### 2. 安装依赖并编译
 
 ```bat
 cd app
-npm ci
+pnpm install
 cd ..
 
-tools\build-keys.cmd
+tools\build-tools.cmd
 ```
 
-`tools\build-keys.cmd` 等价于：
+`tools\build-tools.cmd` 会编译两个工具：
 
 ```bat
 cd tools\keyextract-src
 go build -o ..\wechat-keys.exe .
+cd ..\imgcheck-src
+go build -o ..\imgcheck.exe .
 ```
+
+- `wechat-keys.exe`：提取数据库密钥与账户 seed
+- `imgcheck.exe`：完整解码图片，识别微信只下载了一半的损坏缓存，避免页面显示噪点/绿块
 
 ### 3. 启动
 
@@ -71,22 +80,22 @@ start.cmd
 ```
 WeChatViewer/
   start.cmd                    启动器（按需提取密钥 → 启动服务）
-  build-keys.cmd               编译密钥提取器
   LICENSE                      AGPL-3.0
   app/
     server.mjs                 本地 HTTP 服务（127.0.0.1:8788）
     decrypt.mjs                数据库增量解密与清单
     sqlcipher.mjs              SQLCipher 4 页解密与 HMAC 校验
-    wechat.mjs                 数据层：会话、联系人、消息、头像、媒体定位
+    wechat.mjs                 数据层：会话、联系人、消息、头像、媒体定位、搜索
     media.mjs                  SILK → WAV
     export.mjs                 HTML / TXT / CSV 导出
     public/                    前端（微信风格 UI）
     package.json               silk-wasm 依赖
+    pnpm-lock.yaml             锁定的依赖版本
   tools/
-    keyextract-src/
-      main.go                  Win32 API 密钥/seed 提取器
-      go.mod
-    build-keys.cmd
+    keyextract-src/            Win32 API 密钥/seed 提取器
+    imgcheck-src/              图片完整性校验器（Go image.Decode）
+    build-tools.cmd            编译上述两个 exe
+    build-keys.cmd             仅编译密钥提取器
     make-sticker-thumbs.ps1    表情缩略图（System.Drawing）
   data/                        运行时生成，已 gitignore（敏感）
 ```
@@ -204,10 +213,12 @@ V2 布局（偏移从 0 开始）：
 
 - 仅支持 Windows；密钥提取依赖 Win32 API，`System.Drawing` 缩略图同样仅 Windows
 - 必须让微信保持登录才能提取/刷新密钥；数据库是解密时的快照，微信未落盘的 WAL 最新消息可能暂缺
-- `wxgf` 格式（HEVC 动画容器）浏览器无法直接解码，会回退到同消息的 JPEG 缩略图
+- **图片清晰度取决于本机缓存**：微信只有在“查看原图”后才保存 `_h` 原图。查看器优先 `_h`，其次完整中间图，最后缩略图；`wxgf`/HEVC 中间图常是未下载完整的预览，本项目不再强行解码（否则会出现绿块/噪点），此时显示本机可用的最高清版本
+- **损坏/半截图片会被跳过**：微信缓存里存在大量只下载了一半的 `.dat`（有 JPEG 头、甚至有 EOI，但扫描数据已损坏）。`imgcheck.exe` 会完整解码校验，坏图自动回退到缩略图；若所有版本都损坏则显示 `[图片]`。在微信中打开该图片并点「查看原图」，文件落盘后查看器会在 60 秒内重新发现并显示原图
 - 表情/头像补全需要网络；不可达时显示 `[表情]` / 彩色首字
 - 批量补全后 `data/media-cache/stickers/` 可能约 1GB（原图表情较大），`sticker-thumbs/` 约 80MB，可随时删除
 - 超大群聊导出的单文件 HTML 可能达到数百 MB（受媒体预算限制），建议按需导出或先补全表情
+- 首次搜索 10 万条消息的会话会在内存构建索引，约需数秒到十几秒；之后复用缓存
 - 微信版本升级可能改变内存结构或媒体格式；本项目不保证跨版本兼容
 
 ---
@@ -235,13 +246,13 @@ V2 布局（偏移从 0 开始）：
 
 ```bat
 cd app
-npm ci
+pnpm install
 node server.mjs --no-open
 ```
 
 - 数据层集中在 `app/wechat.mjs`，改格式解析时优先看 `parseMessage`、`decodeImageFile`、`readSticker`
 - 导出逻辑在 `app/export.mjs`；前端在 `app/public/`
-- 修改密钥提取器后重新执行 `tools\build-keys.cmd`
+- 修改密钥提取器或图片校验器后重新执行 `tools\build-tools.cmd`
 
 ## 第三方与参考
 
