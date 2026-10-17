@@ -365,8 +365,6 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-bubble { padding: 9px 12px; border-radius: 6px; position: relative; word-break: break-word; white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
 .wx-row.in .wx-bubble { background: #fff; }
 .wx-row.out .wx-bubble { background: #95ec69; }
-.wx-row.out .wx-bubble.text,
-.wx-row.out .wx-bubble.quote { background: transparent !important; padding: 0; }
 .wx-text a { color: #576b95; }
 .wx-bubble.image { padding: 3px; background: transparent !important; }
 .wx-bubble.sticker { padding: 0; background: transparent !important; }
@@ -386,8 +384,8 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-voice.playing .wx-voice-wave i:nth-child(3) { animation-delay: .3s; }
 .wx-voice-dur { font-size: 13px; opacity: .8; }
 @keyframes wxVoicePulse { from { transform: scaleY(.45); } to { transform: scaleY(1.15); } }
-.wx-quote { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; background: transparent; color: #8a8a8a; border-radius: 0; padding: 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.wx-row.out .wx-quote { background: transparent; color: #8a8a8a; }
+.wx-quote { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; background: #d9d9d9; color: #555; border-radius: 6px; padding: 7px 9px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.wx-row.out .wx-quote { background: rgba(0,0,0,.28); color: #f2f2f2; }
 .wx-quote-link { text-decoration: none; cursor: pointer; }
 .wx-quote-link:hover { filter: brightness(.97); }
 .wx-quote-name { font-weight: 600; margin-right: 4px; }

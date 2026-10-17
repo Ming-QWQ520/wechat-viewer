@@ -169,10 +169,10 @@ body {
 .pat { text-align: center; color: #9a9a9a; font-size: 12px; margin: 10px auto; max-width: 80%; }
 .quote-block {
   margin-top: 6px;
-  background: transparent;
-  color: #8a8a8a;
-  border-radius: 0;
-  padding: 0;
+  background: #d9d9d9;
+  color: #555;
+  border-radius: 6px;
+  padding: 7px 9px;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -182,7 +182,7 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.row.out .quote-block { background: transparent; color: #8a8a8a; }
+.row.out .quote-block { background: rgba(0, 0, 0, 0.28); color: #f2f2f2; }
 .quote-link { cursor: pointer; }
 .quote-link:hover { filter: brightness(0.97); }
 .quote-name { font-weight: 600; margin-right: 4px; }
@@ -205,8 +205,6 @@ body {
   width: fit-content;
 }
 .row.out .bubble { background: var(--green); }
-.row.out .bubble.text,
-.row.out .bubble.quote { background: transparent !important; padding: 0; }
 .bubble.image { padding: 3px; background: transparent !important; }
 .bubble.image img { display: block; max-width: 240px; max-height: 320px; border-radius: 4px; cursor: zoom-in; }
 .bubble.sticker-bubble { padding: 0; background: transparent !important; }

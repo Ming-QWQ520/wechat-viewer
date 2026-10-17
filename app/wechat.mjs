@@ -70,8 +70,9 @@ export function normalizeText(text) {
   return String(text ?? "")
     .replace(/\r\n?/g, "\n")
     .replace(/[\u200b\u200c\u200d\ufeff]/g, "")
-    .replace(/[ \t\u00a0\u2005\u3000]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t\u00a0\u2005\u3000]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{2,}/g, "\n")
     .replace(/^[\s\u00a0\u2005\u3000]+|[\s\u00a0\u2005\u3000]+$/g, "");
 }
 
@@ -583,15 +584,53 @@ export class WeChatData {
       const referMatch = app.match(/<refermsg>([\s\S]*?)<\/refermsg>/);
       const referXml = referMatch ? referMatch[1] : "";
       const referType = Number(getTag(referXml, "type") || 0);
-      let quoted = htmlUnescape(stripXml(getTag(referXml, "content") || ""));
-      if (referType === 3) quoted = "[图片]";
-      else if (referType === 34) quoted = "[语音]";
-      else if (referType === 43) quoted = "[视频]";
-      else if (referType === 47) quoted = "[表情]";
-      else if (referType === 49) quoted = "[链接]";
+      const rawRefer = getTag(referXml, "content") || "";
+      let quoted = "";
+      if (referType === 1) {
+        quoted = htmlUnescape(stripXml(rawRefer));
+        if (/^\s*<(\?xml|msg|appmsg)/i.test(quoted)) quoted = "[消息]";
+      } else if (referType === 3) {
+        quoted = "[图片]";
+      } else if (referType === 34) {
+        quoted = "[语音]";
+      } else if (referType === 43) {
+        quoted = "[视频]";
+      } else if (referType === 47) {
+        quoted = "[表情]";
+      } else if (referType === 42) {
+        quoted = "[名片]";
+      } else if (referType === 48) {
+        const xml = htmlUnescape(rawRefer);
+        const label = htmlUnescape(getAttr(xml, "label") || getAttr(xml, "poiname") || "");
+        quoted = label ? `[位置] ${label}` : "[位置]";
+      } else if (referType === 49) {
+        const xml = htmlUnescape(rawRefer);
+        const appType = Number(getTag(xml, "type") || 0);
+        const title = htmlUnescape(stripXml(getTag(xml, "title") || ""));
+        let label = "[链接]";
+        if (appType === 6) label = "[文件]";
+        else if (appType === 19) label = "[聊天记录]";
+        else if (appType === 33 || appType === 36) label = "[小程序]";
+        else if (appType === 57) label = "[引用]";
+        quoted = title ? `${label} ${title}` : label;
+      } else if (referType === 50) {
+        quoted = "[通话]";
+      } else if (referType === 62) {
+        quoted = "[拍一拍]";
+      } else if (referType === 10000) {
+        quoted = "[系统消息]";
+      } else {
+        const text = htmlUnescape(stripXml(rawRefer));
+        quoted = /<\/?[a-z][^>]*>/i.test(text) || /^\s*<\?xml/i.test(text) ? "[消息]" : text;
+      }
+      if (referType === 1) {
+        quoted = normalizeText(quoted);
+      } else {
+        quoted = quoted.replace(/[\s\u00a0\u2005\u3000]+/g, " ").trim();
+      }
       message.quote = {
         sender: htmlUnescape(stripXml(getTag(referXml, "displayname") || "")),
-        text: normalizeText(quoted),
+        text: quoted,
         svrId: String(getTag(referXml, "svrid") || "").trim(),
         createTime: Number(getTag(referXml, "createtime") || 0),
         chatUser: htmlUnescape(stripXml(getTag(referXml, "chatusr") || "")),
