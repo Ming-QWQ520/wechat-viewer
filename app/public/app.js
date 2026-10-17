@@ -151,6 +151,7 @@ async function selectChat(session) {
   $("chat-search-kind").value = "";
   $("chat-search-status").textContent = "";
   $("chat-search-clear").classList.add("hidden");
+  $("chat-locate-latest").classList.add("hidden");
   const box = $("messages");
   box.classList.remove("search-results");
   box.innerHTML = '<div class="load-more">加载中…</div>';
@@ -172,7 +173,8 @@ async function runSearch() {
     if (kind) params.set("types", kind);
     const data = await (await fetch("/api/search?" + params.toString())).json();
     state.searchActive = true;
-    const box = $("messages");
+  $("chat-locate-latest").classList.add("hidden");
+  const box = $("messages");
     box.classList.add("search-results");
     box.innerHTML = "";
     if (!data.messages || data.messages.length === 0) {
@@ -212,9 +214,51 @@ async function clearSearch() {
   state.searchActive = false;
   $("chat-search-status").textContent = "";
   $("chat-search-clear").classList.add("hidden");
+  $("chat-locate-latest").classList.add("hidden");
   $("messages").classList.remove("search-results");
   state.cursor = null;
   await loadMessages(true);
+}
+
+async function jumpToQuote(serverId) {
+  if (!state.current || !serverId || state.loading) return;
+  state.loading = true;
+  $("chat-search-status").textContent = "定位中…";
+  try {
+    const locateUrl = `/api/locate?chat=${encodeURIComponent(state.current)}&serverId=${encodeURIComponent(serverId)}`;
+    const location = await (await fetch(locateUrl)).json();
+    if (!location.found) {
+      $("chat-search-status").textContent = "未找到原消息（可能已删除）";
+      return;
+    }
+    const params = new URLSearchParams({
+      chat: state.current,
+      before: String(location.sort + 1),
+      limit: "80",
+    });
+    const page = await (await fetch("/api/messages?" + params.toString())).json();
+    state.searchActive = false;
+    $("messages").classList.remove("search-results");
+    $("chat-search-clear").classList.add("hidden");
+    state.cursor = page.cursor;
+    state.messages = page.messages;
+    state.hasMore = page.hasMore;
+    const box = $("messages");
+    box.innerHTML = "";
+    appendMessages(page.messages, box, true);
+    const target = [...box.querySelectorAll(".row")].find((row) => row.dataset.serverId === String(serverId));
+    if (target) {
+      target.classList.add("highlight");
+      target.scrollIntoView({ block: "center" });
+      setTimeout(() => target.classList.remove("highlight"), 3000);
+      $("chat-search-status").textContent = `已定位到 ${dayKey(location.time)} ${clock(location.time)}`;
+    } else {
+      $("chat-search-status").textContent = "已加载原消息附近，但未找到该条消息";
+    }
+    $("chat-locate-latest").classList.remove("hidden");
+  } finally {
+    state.loading = false;
+  }
 }
 
 async function loadMessages(reset) {
@@ -301,6 +345,7 @@ function renderMessage(m) {
   }
   const row = document.createElement("div");
   row.className = "row " + (m.isSelf ? "out" : "in");
+  if (m.serverId) row.dataset.serverId = m.serverId;
 
   const avatar = document.createElement("div");
   avatar.className = "avatar";
@@ -433,21 +478,7 @@ function renderMessage(m) {
       break;
     }
     case "quote": {
-      const quote = document.createElement("div");
-      quote.className = "quote";
-      const qname = document.createElement("div");
-      qname.className = "quote-name";
-      qname.textContent = m.quote?.sender || "";
-      const qtext = document.createElement("div");
-      qtext.className = "quote-text";
-      qtext.textContent = m.quote?.text || "";
-      quote.appendChild(qname);
-      quote.appendChild(qtext);
-      bubble.appendChild(quote);
-      const reply = document.createElement("div");
-      reply.className = "wx-text";
-      reply.innerHTML = linkify(m.text || "引用消息");
-      bubble.appendChild(reply);
+      bubble.innerHTML = linkify(m.text || "引用消息");
       break;
     }
     case "chatRecord": {
@@ -479,6 +510,21 @@ function renderMessage(m) {
   time.textContent = clock(m.time);
 
   wrap.appendChild(bubble);
+  if (m.kind === "quote" && m.quote) {
+    const quote = document.createElement("div");
+    quote.className = "quote" + (m.quote.svrId ? " quote-link" : "");
+    quote.title = m.quote.svrId ? "点击定位到原消息" : "";
+    const name = document.createElement("span");
+    name.className = "quote-name";
+    name.textContent = m.quote.sender ? `${m.quote.sender}：` : "";
+    const text = document.createElement("span");
+    text.className = "quote-text";
+    text.textContent = m.quote.text || "";
+    quote.appendChild(name);
+    quote.appendChild(text);
+    if (m.quote.svrId) quote.addEventListener("click", () => jumpToQuote(m.quote.svrId));
+    wrap.appendChild(quote);
+  }
   wrap.appendChild(time);
   row.appendChild(avatar);
   row.appendChild(wrap);
@@ -510,6 +556,7 @@ $("chat-search-kind").addEventListener("change", () => {
   if ($("chat-search-input").value.trim() || $("chat-search-kind").value) runSearch();
 });
 $("chat-search-clear").addEventListener("click", clearSearch);
+$("chat-locate-latest").addEventListener("click", clearSearch);
 
 $("search").addEventListener("input", (e) => {
   state.filter = e.target.value;

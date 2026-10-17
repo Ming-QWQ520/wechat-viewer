@@ -222,14 +222,16 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(workers);
 }
 
-function bubbleHtml(message, media, group, avatarClass = null) {
+function bubbleHtml(message, media, group, avatarClass = null, quoteTargets = null) {
+  const serverId = message.serverId && /^\d+$/.test(String(message.serverId)) ? String(message.serverId) : "";
+  const rowId = serverId ? ` id="m-${serverId}"` : "";
   if (message.kind === "system") {
-    return `<div class="wx-system" data-kind="system">${linksToHtml(message.system || "")}<div class="wx-time wx-time-center">${formatDateTime(
+    return `<div class="wx-system"${rowId} data-kind="system">${linksToHtml(message.system || "")}<div class="wx-time wx-time-center">${formatDateTime(
       message.time,
     )}</div></div>`;
   }
   if (message.kind === "pat") {
-    return `<div class="wx-system wx-pat" data-kind="pat">${escapeHtml(message.text || "拍了拍")}<div class="wx-time wx-time-center">${formatDateTime(
+    return `<div class="wx-system wx-pat"${rowId} data-kind="pat">${escapeHtml(message.text || "拍了拍")}<div class="wx-time wx-time-center">${formatDateTime(
       message.time,
     )}</div></div>`;
   }
@@ -289,13 +291,7 @@ function bubbleHtml(message, media, group, avatarClass = null) {
           }</div>`;
       break;
     case "quote":
-      inner = `${
-        message.quote?.sender || message.quote?.text
-          ? `<div class="wx-quote">${
-              message.quote?.sender ? `<div class="wx-quote-name">${escapeHtml(message.quote.sender)}</div>` : ""
-            }<div class="wx-quote-text">${escapeHtml(message.quote?.text || "")}</div></div>`
-          : ""
-      }<div class="wx-text">${linksToHtml(message.text || "")}</div>`;
+      inner = `<div class="wx-text">${linksToHtml(message.text || "")}</div>`;
       break;
     case "chatRecord":
       inner = `<div class="wx-file"><div class="wx-file-icon">💬</div><div class="wx-file-body"><div class="wx-file-name">${escapeHtml(
@@ -318,9 +314,22 @@ function bubbleHtml(message, media, group, avatarClass = null) {
     default:
       inner = `<div class="wx-text">${escapeHtml(message.text || "[消息]")}</div>`;
   }
-  return `<div class="wx-row ${cls}" data-kind="${escapeHtml(message.kind)}">
+  let quoteHtml = "";
+  if (message.kind === "quote" && message.quote) {
+    const sid = String(message.quote.svrId || "");
+    const linkable = sid && quoteTargets && quoteTargets.has(sid);
+    const tag = linkable ? "a" : "div";
+    const attrs = linkable ? ` href="#m-${sid}"` : "";
+    const name = message.quote.sender
+      ? `<span class="wx-quote-name">${escapeHtml(message.quote.sender)}：</span>`
+      : "";
+    quoteHtml = `<${tag} class="wx-quote${linkable ? " wx-quote-link" : ""}"${attrs} title="${escapeHtml(
+      message.quote.text || "",
+    )}">${name}${escapeHtml(message.quote.text || "")}</${tag}>`;
+  }
+  return `<div class="wx-row ${cls}"${rowId} data-kind="${escapeHtml(message.kind)}">
   <div class="wx-avatar${avatarExtraClass}"${avatarStyle}>${avatarInner}</div>
-  <div class="wx-bubble-wrap">${nameHtml}<div class="wx-bubble ${message.kind}">${inner}</div><div class="wx-time">${formatDateTime(message.time)}</div></div>
+  <div class="wx-bubble-wrap">${nameHtml}<div class="wx-bubble ${message.kind}">${inner}</div>${quoteHtml}<div class="wx-time">${formatDateTime(message.time)}</div></div>
 </div>`;
 }
 
@@ -374,9 +383,13 @@ body { margin: 0; background: #ededed; font-family: -apple-system, BlinkMacSyste
 .wx-voice.playing .wx-voice-wave i:nth-child(3) { animation-delay: .3s; }
 .wx-voice-dur { font-size: 13px; opacity: .8; }
 @keyframes wxVoicePulse { from { transform: scaleY(.45); } to { transform: scaleY(1.15); } }
-.wx-quote { background: rgba(0,0,0,.055); border-left: 3px solid rgba(0,0,0,.12); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; color: #666; white-space: pre-wrap; word-break: break-word; }
-.wx-row.out .wx-quote { background: rgba(0,0,0,.08); }
-.wx-quote-name { font-weight: 500; margin-bottom: 2px; }
+.wx-quote { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 4px; background: #d9d9d9; color: #555; border-radius: 6px; padding: 7px 9px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.wx-row.out .wx-quote { background: rgba(0,0,0,.28); color: #f2f2f2; }
+.wx-quote-link { text-decoration: none; cursor: pointer; }
+.wx-quote-link:hover { filter: brightness(.97); }
+.wx-quote-name { font-weight: 600; margin-right: 4px; }
+.wx-row { scroll-margin-top: 150px; }
+.wx-row:target .wx-bubble, .wx-system:target { box-shadow: 0 0 0 2px #07c160; }
 .wx-video img { display: block; max-width: 260px; border-radius: 4px; }
 .wx-video-placeholder { width: 220px; height: 140px; background: #333; color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 28px; }
 .wx-video-link { position: relative; display: inline-block; }
@@ -406,7 +419,8 @@ const EXPORT_SCRIPT = `
     var text = cache.get(el);
     if (text === undefined) {
       var bubble = el.querySelector('.wx-bubble');
-      text = (bubble ? bubble.textContent : el.textContent || '').toLowerCase();
+      var quote = el.querySelector('.wx-quote');
+      text = ((bubble ? bubble.textContent : '') + ' ' + (quote ? quote.textContent : (el.textContent || ''))).toLowerCase();
       cache.set(el, text);
     }
     return text;
@@ -567,6 +581,9 @@ export async function exportChatHtmlStream(data, username, cacheDir, write, opti
   if (styleRules.length > 0) {
     write(`<style>${styleRules.join("\n")}</style>`);
   }
+  const quoteTargets = new Set(
+    messages.map((message) => String(message.serverId || "")).filter((id) => /^\d+$/.test(id)),
+  );
   const group = username.endsWith("@chatroom");
   let lastDay = null;
   for (const message of messages) {
@@ -580,7 +597,7 @@ export async function exportChatHtmlStream(data, username, cacheDir, write, opti
     const stickerKey = (message.sticker?.md5 || message.sticker?.thumbMd5 || "").toLowerCase();
     media.stickerClass = stickerStyles.get(stickerKey)?.className ?? null;
     const sender = message.senderUsername || username;
-    chunk += bubbleHtml(message, media, group, avatarClasses.get(sender) || null);
+    chunk += bubbleHtml(message, media, group, avatarClasses.get(sender) || null, quoteTargets);
     write(chunk);
   }
   write(`\n</div>\n<div class="wx-footer">由 WeChatViewer 导出</div>\n</div><script>${EXPORT_SCRIPT}</script></body></html>`);

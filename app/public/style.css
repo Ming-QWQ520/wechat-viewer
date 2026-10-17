@@ -168,18 +168,25 @@ body {
 .sys { text-align: center; color: #9a9a9a; font-size: 12px; margin: 10px auto; max-width: 80%; }
 .pat { text-align: center; color: #9a9a9a; font-size: 12px; margin: 10px auto; max-width: 80%; }
 .quote {
-  background: rgba(0, 0, 0, 0.055);
-  border-left: 3px solid rgba(0, 0, 0, 0.12);
-  border-radius: 4px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
+  margin-top: 4px;
+  background: #d9d9d9;
+  color: #555;
+  border-radius: 6px;
+  padding: 7px 9px;
   font-size: 12px;
-  color: #666;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.row.out .quote { background: rgba(0, 0, 0, 0.08); }
-.quote-name { font-weight: 500; margin-bottom: 2px; }
+.row.out .quote { background: rgba(0, 0, 0, 0.28); color: #f2f2f2; }
+.quote-link { cursor: pointer; }
+.quote-link:hover { filter: brightness(0.97); }
+.quote-name { font-weight: 600; margin-right: 4px; }
+.row.highlight .bubble { box-shadow: 0 0 0 2px #07c160; }
 
 .row { display: flex; gap: 8px; margin: 10px 0; align-items: flex-start; }
 .row.out { flex-direction: row-reverse; }

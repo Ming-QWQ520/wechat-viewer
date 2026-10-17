@@ -248,6 +248,13 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (pathname === "/api/locate") {
+      const chat = q.get("chat");
+      const serverId = q.get("serverId");
+      if (!chat || !serverId) return sendJson(res, { error: "bad request" }, 400);
+      return sendJson(res, data.locateMessageByServerId(chat, serverId));
+    }
+
     if (pathname === "/api/search") {
       const chat = q.get("chat");
       if (!chat) return sendJson(res, { error: "chat required" }, 400);

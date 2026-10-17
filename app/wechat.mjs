@@ -287,7 +287,7 @@ export class WeChatData {
     const shards = this.locateMessageShards(username);
     if (shards.length === 0) return { messages: [], hasMore: false, cursor: null };
     const cols =
-      "local_id, local_type, sort_seq, real_sender_id, create_time, message_content, compress_content, source, packed_info_data";
+      "local_id, local_type, sort_seq, real_sender_id, create_time, message_content, compress_content, source, packed_info_data, CAST(server_id AS TEXT) AS server_id_text";
     const cursors = cursor && typeof cursor === "object" ? cursor : {};
     const merged = [];
     let shardHasMore = false;
@@ -398,6 +398,34 @@ export class WeChatData {
     return { messages: results, limited };
   }
 
+  /** Resolve a quoted message's <svrid> to its position in this chat. */
+  locateMessageByServerId(username, serverId) {
+    const sid = String(serverId || "").trim();
+    if (!/^\d+$/.test(sid)) return { found: false };
+    for (const { db, table, shard } of this.locateMessageShards(username)) {
+      try {
+        const row = db
+          .prepare(
+            `select local_id, sort_seq, create_time, CAST(server_id AS TEXT) as sid
+             from "${table}" where CAST(server_id AS TEXT) = ? limit 1`,
+          )
+          .get(sid);
+        if (row) {
+          return {
+            found: true,
+            sort: Number(row.sort_seq),
+            localId: Number(row.local_id),
+            time: Number(row.create_time),
+            shard,
+          };
+        }
+      } catch {
+        // table without server_id on older schemas
+      }
+    }
+    return { found: false };
+  }
+
   // ---------- message parsing ----------
 
   parseMessage(row, chatUsername, names, shard) {
@@ -417,6 +445,7 @@ export class WeChatData {
       id: Number(row.local_id),
       sort: Number(row.sort_seq),
       time: Number(row.create_time),
+      serverId: row.server_id_text ? String(row.server_id_text) : "",
       type: base,
       subType: sub,
       senderUsername,
@@ -563,6 +592,9 @@ export class WeChatData {
       message.quote = {
         sender: htmlUnescape(stripXml(getTag(referXml, "displayname") || "")),
         text: normalizeText(quoted),
+        svrId: String(getTag(referXml, "svrid") || "").trim(),
+        createTime: Number(getTag(referXml, "createtime") || 0),
+        chatUser: htmlUnescape(stripXml(getTag(referXml, "chatusr") || "")),
       };
       return;
     }
