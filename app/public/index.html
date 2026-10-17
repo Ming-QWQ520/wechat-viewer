@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WeChatViewer · 微信聊天记录查看器</title>
+<link rel="stylesheet" href="/style.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">微信聊天记录</div>
+      <input id="search" class="search" placeholder="搜索会话 / 联系人" autocomplete="off">
+    </div>
+    <div id="session-list" class="session-list"></div>
+    <div class="sidebar-foot" id="account-line">读取中…</div>
+  </aside>
+  <main class="main">
+    <div id="empty" class="empty">选择左侧会话查看聊天记录</div>
+    <div id="chat-view" class="chat-view hidden">
+      <header class="chat-head">
+        <div>
+          <div class="chat-title" id="chat-title"></div>
+          <div class="chat-sub" id="chat-sub"></div>
+        </div>
+        <div class="toolbar">
+          <button id="download-stickers" title="从微信 CDN 补全本机未缓存的表情包">补全表情包</button>
+          <button data-format="html">导出 HTML</button>
+          <button data-format="txt">导出 TXT</button>
+          <button data-format="csv">导出 CSV</button>
+        </div>
+      </header>
+      <div id="imgkey-banner" class="banner hidden">
+        <span>部分图片为微信 V2 加密格式：先<strong>在微信中打开任意一张图片</strong>，然后 </span>
+        <button id="refresh-keys">重新扫描图片密钥</button>
+        <span id="refresh-status"></span>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="composer">只读查看器 · 数据来自本机微信数据库</div>
+    </div>
+  </main>
+</div>
+<div id="lightbox" class="lightbox hidden"><img id="lightbox-img" alt=""></div>
+<script src="/app.js?v=3"></script>
+</body>
+</html>

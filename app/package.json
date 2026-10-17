@@ -1,0 +1,28 @@
+{
+  "name": "wechat-viewer",
+  "version": "1.0.0",
+  "description": "Local WeChat 4.x chat viewer and HTML/TXT/CSV exporter (Windows, read-only)",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "keywords": [
+    "wechat",
+    "wcdb",
+    "sqlcipher",
+    "chat-export",
+    "reverse-engineering"
+  ],
+  "author": "Ming-QWQ520",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ming-QWQ520/wechat-viewer.git"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "silk-wasm": "^3.7.1"
+  }
+}
